@@ -28,11 +28,12 @@ def create_q_model():
 
     # Convolutions on the frames on the screen
     if WIDTH < 40:
-        layer1 = layers.Dense(8, activation="relu")(inputs)
-        layer2 = layers.Dense(32, activation="relu")(layer1)
-        layer4 = layers.Flatten()(layer2)
-        layer5 = layers.Dense(16, activation="relu")(layer4)
-        sel_action = layers.Dense(4, activation="linear")(layer5)
+        layer1 = layers.Conv2D(WIDTH - 2, 4, strides=4, activation="relu")(inputs)
+        # layer1 = layers.Dense(8, activation="relu")(inputs)
+        layer2 = layers.Flatten()(layer1)
+        layer3 = layers.Dense(32, activation="relu")(layer2)
+        layer4 = layers.Dense(16, activation="relu")(layer3)
+        sel_action = layers.Dense(4, activation="linear")(layer4)
     else:
         # Convolutions on the frames on the screen
         layer1 = layers.Conv2D(32, 4, strides=4, activation="relu")(inputs)
