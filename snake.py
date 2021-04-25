@@ -5,6 +5,7 @@ import random
 
 rewards = {"food": 200, "hit": -1000, "step": -1}
 mov_dir = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+p_types = {"empty": 1, "body": 0.3, "head": 0.59, "food": 0.11}
 
 
 class SnakeEnv:
@@ -20,7 +21,7 @@ class SnakeEnv:
         self.height = height
 
         # pixel types: empty = 0, snake body = 1, snake head = 2, food = 3
-        self.state[start_loc[0], start_loc[1]] = 2
+        self.state[start_loc[0], start_loc[1]] = p_types["head"]
 
     def step(self, action):
         s_body = self.s_body
@@ -79,9 +80,9 @@ class SnakeEnv:
         self.state = np.zeros((self.width, self.height))
         s_body = self.s_body
         for i in s_body[:-1]:
-            self.state[i[0], i[1]] = 1
-        self.state[s_body[-1][0], s_body[-1][1]] = 2
-        self.state[self.food[0], self.food[1]] = 3
+            self.state[i[0], i[1]] = p_types["body"]
+        self.state[s_body[-1][0], s_body[-1][1]] = p_types["head"]
+        self.state[self.food[0], self.food[1]] = p_types["food"]
 
     def reset(self):
         self.reset_food()
