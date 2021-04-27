@@ -47,9 +47,16 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model = create_q_model()
-model_target = create_q_model()
+model_name = "model2"
+target_model_name = "target_model2"
 
+"""model = create_q_model()
+model_target = create_q_model()"""
+
+print("Loading models...")
+model = keras.models.load_model(model_name, compile=False)
+model_target = keras.models.load_model(target_model_name, compile=False)
+print("Loaded.")
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 
@@ -61,6 +68,7 @@ rewards_history = []
 done_history = []
 episode_reward_history = []
 running_reward = 0
+max_reward = -1000
 episode_count = 0
 frame_count = 0
 # Number of frames to take random action and observe output
@@ -77,7 +85,15 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
-t = time.time()
+
+def save_models():
+    global max_reward, model, model_target
+    max_reward = running_reward
+    model.save(model_name)
+    model_target.save(target_model_name)
+
+
+t0 = t = time.time()
 while True:
     state = np.array(snake.reset())
     # snake.render(1 / FPS)
@@ -159,11 +175,12 @@ while True:
             # update the the target network with new weights
             model_target.set_weights(model.get_weights())
             # Log details
-            template = "running reward: {:.2f} at episode {}, frame count {}, time: {}"
-            print(template.format(running_reward, episode_count, frame_count, time.time() - t))
+            template = "running reward: {:.2f} at episode {}, frame count {}, time: {}, epsilon: {}"
+            print(template.format(running_reward, episode_count, frame_count, time.time() - t, epsilon))
             t = time.time()
+            save_models()
 
-            # Limit the state and reward history
+        # Limit the state and reward history
         if len(rewards_history) > max_memory_length:
             del rewards_history[:1]
             del state_history[:1]
@@ -182,6 +199,7 @@ while True:
 
     episode_count += 1
 
-    if running_reward > 40:  # Condition to consider the task solved
+    if running_reward > 1000:  # Condition to consider the task solved
         print("Solved at episode {}!".format(episode_count))
+        save_models()
         break

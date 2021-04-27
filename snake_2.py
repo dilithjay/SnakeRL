@@ -3,10 +3,9 @@ import matplotlib.pyplot as plt
 import random
 
 
-rewards = {"food": 200, "hit": -1000, "step": -1}
+rewards = {"food": 500, "hit": -300, "step": -10}
 mov_dir = [(0, 1), (1, 0), (0, -1), (-1, 0)]
 p_types = {"empty": 1, "body": 0.3, "head": 0.59, "food": 0.11}
-
 
 
 class SnakeEnv:
@@ -31,8 +30,10 @@ class SnakeEnv:
         reward = 0
         done = False
 
-        if cur_dir == (action + 2) % 4:
+        if (cur_dir + 2) % 4 == (action + 2) % 4 or cur_dir == (action + 2) % 4:
             action = cur_dir
+        else:
+            self.cur_dir = action
         x, y = [s_body[-1][0] + mov_dir[action][0],
                 s_body[-1][1] + mov_dir[action][1]]
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
