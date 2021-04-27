@@ -47,16 +47,16 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model_name = "model2"
-target_model_name = "target_model2"
+model_name = "model1"
+target_model_name = "target_model1"
 
-"""model = create_q_model()
-model_target = create_q_model()"""
+model = create_q_model()
+model_target = create_q_model()
 
-print("Loading models...")
+"""print("Loading models...")
 model = keras.models.load_model(model_name, compile=False)
 model_target = keras.models.load_model(target_model_name, compile=False)
-print("Loaded.")
+print("Loaded.")"""
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 

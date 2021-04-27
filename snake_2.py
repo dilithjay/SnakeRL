@@ -27,7 +27,7 @@ class SnakeEnv:
         s_body = self.s_body
         cur_dir = self.cur_dir
         food = self.food
-        reward = 0
+        reward = rewards["step"]
         done = False
 
         if (cur_dir + 2) % 4 == (action + 2) % 4 or cur_dir == (action + 2) % 4:
