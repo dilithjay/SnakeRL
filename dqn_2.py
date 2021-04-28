@@ -47,16 +47,16 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model_name = "model1"
-target_model_name = "target_model1"
+model_name = "models/model2"
+target_model_name = "models/target_model2"
 
-model = create_q_model()
-model_target = create_q_model()
+"""model = create_q_model()
+model_target = create_q_model()"""
 
-"""print("Loading models...")
+print("Loading models...")
 model = keras.models.load_model(model_name, compile=False)
 model_target = keras.models.load_model(target_model_name, compile=False)
-print("Loaded.")"""
+print("Loaded.")
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 
@@ -85,6 +85,8 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
+explore = False
+
 
 def save_models():
     global max_reward, model, model_target
@@ -96,13 +98,14 @@ def save_models():
 t0 = t = time.time()
 while True:
     state = np.array(snake.reset())
-    # snake.render(1 / FPS)
+    if not explore:
+        snake.render(1 / FPS)
     episode_reward = 0
     for _ in range(max_steps_per_episode):
         frame_count += 1
 
         # Use epsilon-greedy for exploration
-        if frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]:
+        if explore and (frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]):
             # Take random action
             action = np.random.choice(4)
         else:
@@ -190,7 +193,8 @@ while True:
 
         if done:
             break
-        # snake.render(1 / FPS)
+        if not explore:
+            snake.render(1 / FPS)
 
     episode_reward_history.append(episode_reward)
     if len(episode_reward_history) > 100:
