@@ -48,7 +48,7 @@ def create_q_model():
 prefix = "double"
 suffix = "_model1"
 model_name = prefix + suffix
-target_model_name = "_target" + suffix
+target_model_name = prefix + "_target" + suffix
 
 
 new_model = True
@@ -89,7 +89,7 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
-explore = True
+explore = False
 
 
 def save_models():
