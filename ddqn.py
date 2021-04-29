@@ -1,16 +1,12 @@
-from snake_ohe import SnakeEnv
+from snake import SnakeEnv
 import tensorflow as tf
 import numpy as np
-import time
 from tensorflow import keras
 from tensorflow.keras import layers
-
-# Disable GPU
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+import time
 
 WIDTH, HEIGHT = 10, 10
-snake = SnakeEnv([0, 0], 0, width=WIDTH, height=HEIGHT)
+snake = SnakeEnv(width=WIDTH, height=HEIGHT)
 num_steps = 10 ** 6
 FPS = 60
 
@@ -29,16 +25,15 @@ max_steps_per_episode = 10000
 
 def create_q_model():
     # Network defined by the DeepMind paper
-    inputs = layers.Input(shape=(WIDTH, HEIGHT, 4))
+    inputs = layers.Input(shape=(WIDTH, HEIGHT, 1))
 
     # Convolutions on the frames on the screen
     if WIDTH < 40:
-        layer1 = layers.Conv2D(WIDTH - 2, 3, activation="relu")(inputs)
-        # layer1 = layers.Dense(8, activation="relu")(inputs)
-        layer2 = layers.Flatten()(layer1)
-        layer3 = layers.Dense(32, activation="relu")(layer2)
-        layer4 = layers.Dense(16, activation="relu")(layer3)
-        sel_action = layers.Dense(4, activation="linear")(layer4)
+        layer1 = layers.Conv2D(32, 2, strides=2, padding='same', activation="relu")(inputs)
+        layer1a = layers.Conv2D(32, 2, strides=1, padding='same', activation="relu")(layer1)
+        layer2 = layers.Flatten()(layer1a)
+        layer3 = layers.Dense(128, activation="relu")(layer2)
+        sel_action = layers.Dense(4, activation="linear")(layer3)
     else:
         # Convolutions on the frames on the screen
         layer1 = layers.Conv2D(32, 4, strides=4, activation="relu")(inputs)
@@ -50,9 +45,22 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model = create_q_model()
-model_target = create_q_model()
+prefix = "double"
+suffix = "_model1"
+model_name = prefix + suffix
+target_model_name = "_target" + suffix
 
+
+new_model = True
+
+if new_model:
+    model = create_q_model()
+    model_target = create_q_model()
+else:
+    print("Loading models...")
+    model = keras.models.load_model(model_name, compile=False)
+    model_target = keras.models.load_model(target_model_name, compile=False)
+    print("Loaded.")
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 
@@ -64,6 +72,7 @@ rewards_history = []
 done_history = []
 episode_reward_history = []
 running_reward = 0
+max_reward = -1000
 episode_count = 0
 frame_count = 0
 # Number of frames to take random action and observe output
@@ -80,16 +89,27 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
-t = time.time()
+explore = True
+
+
+def save_models():
+    global max_reward, model, model_target
+    max_reward = running_reward
+    model.save(model_name)
+    model_target.save(target_model_name)
+
+
+t0 = t = time.time()
 while True:
     state = np.array(snake.reset())
-    # snake.render(1 / FPS)
+    if not explore:
+        snake.render(1 / FPS)
     episode_reward = 0
     for _ in range(max_steps_per_episode):
         frame_count += 1
 
         # Use epsilon-greedy for exploration
-        if frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]:
+        if explore and (frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]):
             # Take random action
             action = np.random.choice(4)
         else:
@@ -134,10 +154,12 @@ while True:
             # Build the updated Q-values for the sampled future states
             # Use the target model for stability
             future_rewards = model_target.predict(state_next_sample)
+            future_rewards_online = model.predict(state_next_sample)
+            online_action = tf.argmax(future_rewards_online, axis=1)
+            indices = [[i, online_action[i]] for i in range(len(online_action))]
+            expected_q_val = tf.gather_nd(future_rewards, indices)
             # Q value = reward + discount factor * expected future reward
-            updated_q_values = rewards_sample + gamma * tf.reduce_max(
-                future_rewards, axis=1
-            )
+            updated_q_values = rewards_sample + gamma * expected_q_val
 
             # If final frame set the last value to -1
             updated_q_values = updated_q_values * (1 - done_sample) - done_sample
@@ -162,11 +184,12 @@ while True:
             # update the the target network with new weights
             model_target.set_weights(model.get_weights())
             # Log details
-            template = "running reward: {:.2f} at episode {}, frame count {}, time {}"
-            print(template.format(running_reward, episode_count, frame_count, time.time() - t))
+            template = "running reward: {:.2f} at episode {}, frame count {}, time: {}, epsilon: {}"
+            print(template.format(running_reward, episode_count, frame_count, time.time() - t, epsilon))
             t = time.time()
+            save_models()
 
-            # Limit the state and reward history
+        # Limit the state and reward history
         if len(rewards_history) > max_memory_length:
             del rewards_history[:1]
             del state_history[:1]
@@ -176,15 +199,17 @@ while True:
 
         if done:
             break
-        # snake.render(1 / FPS)
+        if not explore:
+            snake.render(1 / FPS)
 
     episode_reward_history.append(episode_reward)
-    if len(episode_reward_history) > 100:
+    if len(episode_reward_history) > 1000:
         del episode_reward_history[:1]
     running_reward = np.mean(episode_reward_history)
 
     episode_count += 1
 
-    if running_reward > 40:  # Condition to consider the task solved
+    if running_reward > 10000:  # Condition to consider the task solved
         print("Solved at episode {}!".format(episode_count))
+        save_models()
         break

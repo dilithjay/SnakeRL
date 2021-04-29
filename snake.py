@@ -3,54 +3,60 @@ import matplotlib.pyplot as plt
 import random
 
 
-rewards = {"food": 200, "hit": -1000, "step": -1}
+rewards = {"food": 500, "hit": -500, "step": -1, "near": 3}
 mov_dir = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-p_types = {"empty": 1, "body": 0.3, "head": 0.59, "food": 0.11}
+p_types = {"empty": 0, "body": 0.33, "head": 0.67, "food": 1}
+
+
+def get_distance(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
 class SnakeEnv:
-    def __init__(self, start_loc, start_dir, width=60, height=60):
-        self.s_body = [start_loc]
-
-        # 0: Up, 1: Right, 2: Down, 3: Left
-        self.cur_dir = start_dir
-        self.state = np.zeros((width, height), int)
-        self.food = [0, 0]
+    def __init__(self, width=60, height=60):
+        self.s_body = None
+        self.state_size = (width, height)
+        self.cur_dir = None
+        self.state = np.zeros(self.state_size, float)
+        self.food = (0, 0)
+        self.invalid_dir_count = 0
+        self.count = 0
 
         self.width = width
         self.height = height
 
-        # pixel types: empty = 0, snake body = 1, snake head = 2, food = 3
-        self.state[start_loc[0], start_loc[1]] = p_types["head"]
-
     def step(self, action):
-        s_body = self.s_body
-        cur_dir = self.cur_dir
-        food = self.food
         reward = 0
         done = False
+        prev_dist = get_distance(self.s_body[-1], self.food)
 
-        if cur_dir == (action + 2) % 4:
-            action = cur_dir
-        x, y = [s_body[-1][0] + mov_dir[action][0],
-                s_body[-1][1] + mov_dir[action][1]]
+        if self.cur_dir != action and self.cur_dir % 2 == action % 2:
+            reward -= 10
+            action = self.cur_dir
+        else:
+            self.cur_dir = action
+        x, y = [self.s_body[-1][0] + mov_dir[action][0],
+                self.s_body[-1][1] + mov_dir[action][1]]
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             reward = rewards["hit"]
             done = True
-        elif x == food[0] and y == food[1]:
-            # print("Food collected")
+        elif x == self.food[0] and y == self.food[1]:
             self.reset_food()
             reward = rewards["food"]
+            self.count += 1
             self.s_body += [[x, y]]
-        elif len(s_body) > 1:
-            self.s_body = s_body[1:] + [[x, y]]
-            if self.s_body[-1] in s_body[:-2]:
+        else:
+            self.s_body = self.s_body[1:] + [[x, y]]
+            if self.s_body[-1] in self.s_body[:-1]:
                 reward = rewards["hit"]
                 done = True
-        else:
-            s_body[0] = [x, y]
         if not done:
             self.update_state()
+        new_dist = get_distance(self.s_body[-1], self.food)
+        if prev_dist > new_dist:
+            reward += rewards["near"]
+        else:
+            reward -= rewards["near"] + 7
         return self.state, reward, done
 
     def render(self, rate):
@@ -60,8 +66,11 @@ class SnakeEnv:
         plt.xlim(0, self.width)
         plt.ylim(0, self.height)
 
+        # plot head
+        plt.scatter(s_body[-1][0], s_body[-1][1], c='#0000ff')
+
         # plot body
-        for x, y in s_body:
+        for x, y in s_body[:-1]:
             plt.scatter(x, y, c='#000000')
 
         # plot food
@@ -74,18 +83,28 @@ class SnakeEnv:
         self.food = (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
 
     def reset_snake(self):
-        self.s_body = [[random.randint(0, self.width - 1), random.randint(0, self.height - 1)]]
+        x, y = random.randint(1, self.width - 2), random.randint(1, self.height - 2)
+        d = random.randint(0, 3)
+        self.cur_dir = d
+        self.s_body = [[x - mov_dir[d][0], y - mov_dir[d][1]], [x, y]]
+
+    def reset(self):
+        self.count = 0
+        self.reset_food()
+        self.reset_snake()
+        self.update_state()
+        return self.state
 
     def update_state(self):
-        self.state = np.zeros((self.width, self.height))
+        self.state = np.zeros(self.state_size)
         s_body = self.s_body
         for i in s_body[:-1]:
             self.state[i[0], i[1]] = p_types["body"]
         self.state[s_body[-1][0], s_body[-1][1]] = p_types["head"]
         self.state[self.food[0], self.food[1]] = p_types["food"]
 
-    def reset(self):
-        self.reset_food()
-        self.reset_snake()
-        self.update_state()
-        return self.state
+    def get_cur_dir(self):
+        return self.cur_dir
+
+    def get_food_count(self):
+        return self.count

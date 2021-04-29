@@ -1,4 +1,4 @@
-from snake_2 import SnakeEnv
+from snake import SnakeEnv
 import tensorflow as tf
 import numpy as np
 from tensorflow import keras
@@ -6,7 +6,7 @@ from tensorflow.keras import layers
 import time
 
 WIDTH, HEIGHT = 10, 10
-snake = SnakeEnv([0, 0], 0, width=WIDTH, height=HEIGHT)
+snake = SnakeEnv(width=WIDTH, height=HEIGHT)
 num_steps = 10 ** 6
 FPS = 60
 
@@ -25,17 +25,15 @@ max_steps_per_episode = 10000
 
 def create_q_model():
     # Network defined by the DeepMind paper
-    inputs = layers.Input(shape=(WIDTH, HEIGHT, 2))
+    inputs = layers.Input(shape=(WIDTH, HEIGHT, 1))
 
     # Convolutions on the frames on the screen
     if WIDTH < 40:
-        layer1 = layers.Conv2D(WIDTH - 2, 4, strides=2, activation="relu")(inputs)
-        layer1a = layers.Conv2D(WIDTH - 2, 3, strides=1, activation="relu")(layer1)
-        # layer1 = layers.Dense(8, activation="relu")(inputs)
+        layer1 = layers.Conv2D(32, 2, strides=2, padding='same', activation="relu")(inputs)
+        layer1a = layers.Conv2D(32, 2, strides=1, padding='same', activation="relu")(layer1)
         layer2 = layers.Flatten()(layer1a)
-        layer3 = layers.Dense(32, activation="relu")(layer2)
-        layer4 = layers.Dense(16, activation="relu")(layer3)
-        sel_action = layers.Dense(4, activation="linear")(layer4)
+        layer3 = layers.Dense(128, activation="relu")(layer2)
+        sel_action = layers.Dense(4, activation="linear")(layer3)
     else:
         # Convolutions on the frames on the screen
         layer1 = layers.Conv2D(32, 4, strides=4, activation="relu")(inputs)
@@ -47,16 +45,20 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model_name = "models/model2"
-target_model_name = "models/target_model2"
+model_name = "model8_step_penalty"
+target_model_name = "target_" + model_name
 
-"""model = create_q_model()
-model_target = create_q_model()"""
 
-print("Loading models...")
-model = keras.models.load_model(model_name, compile=False)
-model_target = keras.models.load_model(target_model_name, compile=False)
-print("Loaded.")
+new_model = False
+
+if new_model:
+    model = create_q_model()
+    model_target = create_q_model()
+else:
+    print("Loading models...")
+    model = keras.models.load_model(model_name, compile=False)
+    model_target = keras.models.load_model(target_model_name, compile=False)
+    print("Loaded.")
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 
@@ -197,13 +199,13 @@ while True:
             snake.render(1 / FPS)
 
     episode_reward_history.append(episode_reward)
-    if len(episode_reward_history) > 100:
+    if len(episode_reward_history) > 1000:
         del episode_reward_history[:1]
     running_reward = np.mean(episode_reward_history)
 
     episode_count += 1
 
-    if running_reward > 1000:  # Condition to consider the task solved
+    if running_reward > 10000:  # Condition to consider the task solved
         print("Solved at episode {}!".format(episode_count))
         save_models()
         break
