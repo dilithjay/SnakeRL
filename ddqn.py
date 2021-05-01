@@ -47,11 +47,12 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-prefix = "models/double"
+prefix = "models/ddqn"
 suffix = "1"
 model_name = prefix + '_model_' + suffix
 target_model_name = prefix + "_target_model_" + suffix
 
+result_data_loc = "results/ddqn_results.pickle"
 
 new_model = False
 
