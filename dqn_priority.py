@@ -1,11 +1,10 @@
-import pickle
-
 from snake import SnakeEnv
 import tensorflow as tf
 import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
 import time
+import pickle
 
 WIDTH, HEIGHT = 10, 10
 snake = SnakeEnv(width=WIDTH, height=HEIGHT)
@@ -47,7 +46,7 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-prefix = "models/double"
+prefix = "models/priority"
 suffix = "1"
 model_name = prefix + '_model_' + suffix
 target_model_name = prefix + "_target_model_" + suffix
@@ -91,7 +90,20 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
-explore = True
+
+def huber_priority_loss_func(values, actions, importance_norm, delta=1.0):
+    error = tf.abs(tf.subtract(values, actions))
+    importance_scaled = importance_norm ** (1 - epsilon)
+    losses = tf.multiply(0.5 * delta ** 2 + delta * tf.subtract(error, tf.constant([delta])), importance_scaled)
+    return tf.reduce_mean(losses)
+
+
+# For prioritized experience replay
+priority_history = []
+offset = 0.1
+priority_scale = 0.7
+
+explore = False
 test_ep_count = 0
 score_list = []
 max_score_list = []
@@ -109,7 +121,7 @@ def save_models():
     model.save(model_name)
     model_target.save(target_model_name)
 
-    with open("ddqn_results.pkl", "wb") as fp:
+    with open("dqn_priority_results.pkl", "wb") as fp:
         pickle.dump([score_list, max_score_list, running_reward_list, num_episodes_list], fp)
 
 
@@ -150,11 +162,15 @@ while True:
         state_next_history.append(state_next)
         done_history.append(done)
         rewards_history.append(reward)
+        priority_history.append(max(priority_history, default=1))
         state = state_next
 
         if frame_count % update_after_actions == 0 and len(done_history) > batch_size:
+            # priority probabilities
+            scaled_priorities = np.array(priority_history)
+            sample_probabilities = scaled_priorities / np.sum(scaled_priorities)
             # Get indices of samples for replay buffers
-            indices = np.random.choice(range(len(done_history)), size=batch_size)
+            indices = np.random.choice(range(len(done_history)), size=batch_size, p=sample_probabilities)
 
             # Using list comprehension to sample from replay buffer
             state_sample = np.array([state_history[i] for i in indices])
@@ -165,20 +181,23 @@ while True:
                 [float(done_history[i]) for i in indices]
             )
 
-            # Double DQN
+            # Build the updated Q-values for the sampled future states
+            # Use the target model for stability
             future_rewards = model_target.predict(state_next_sample)
-            future_rewards_online = model.predict(state_next_sample)
-            online_action = tf.argmax(future_rewards_online, axis=1)
-            indices = [[i, online_action[i]] for i in range(len(online_action))]
-            expected_q_val = tf.gather_nd(future_rewards, indices)
             # Q value = reward + discount factor * expected future reward
-            updated_q_values = rewards_sample + gamma * expected_q_val
+            updated_q_values = rewards_sample + gamma * tf.reduce_max(
+                future_rewards, axis=1
+            )
 
             # If final frame set the last value to -1
             updated_q_values = updated_q_values * (1 - done_sample) - done_sample
 
             # Create a mask so we only calculate loss on the updated Q-values
             masks = tf.one_hot(action_sample, 4)
+
+            # Calculate importance values
+            importance = 1 / max_memory_length / sample_probabilities[indices]
+            importance_normalized = importance / max(importance)
 
             with tf.GradientTape() as tape:
                 # Train the model on the states and updated Q-values
@@ -188,6 +207,11 @@ while True:
                 q_action = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
                 # Calculate loss between new Q-value and old Q-value
                 loss = loss_function(updated_q_values, q_action)
+                # loss_2 = huber_priority_loss_func(updated_q_values, q_action, importance_normalized)
+                # Calculate errors and priorities
+                errors = tf.abs(tf.subtract(updated_q_values, q_action))
+                for i, e in zip(indices, errors):
+                    priority_history[i] = int((e + offset) ** priority_scale)
 
             # Backpropagation
             grads = tape.gradient(loss, model.trainable_variables)
@@ -222,6 +246,7 @@ while True:
             del state_next_history[:1]
             del action_history[:1]
             del done_history[:1]
+            del priority_history[:1]
 
         if done:
             score = snake.get_food_count()

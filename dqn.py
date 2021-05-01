@@ -4,6 +4,7 @@ import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
 import time
+import pickle
 
 WIDTH, HEIGHT = 10, 10
 snake = SnakeEnv(width=WIDTH, height=HEIGHT)
@@ -45,11 +46,13 @@ def create_q_model():
     return keras.Model(inputs=inputs, outputs=sel_action)
 
 
-model_name = "model8_step_penalty"
-target_model_name = "target_" + model_name
+prefix = "models/dqn"
+suffix = "1"
+model_name = prefix + '_model_' + suffix
+target_model_name = prefix + "_target_model_" + suffix
 
 
-new_model = False
+new_model = True
 
 if new_model:
     model = create_q_model()
@@ -87,7 +90,16 @@ update_target_network = 10000
 # Using huber loss for stability
 loss_function = keras.losses.Huber()
 
-explore = False
+explore = True
+test_ep_count = 0
+score_list = []
+max_score_list = []
+tot_score = 0
+done_count = 0
+running_reward_list = []
+num_episodes_list = []
+prev_num_ep = 0
+max_score = 0
 
 
 def save_models():
@@ -95,6 +107,9 @@ def save_models():
     max_reward = running_reward
     model.save(model_name)
     model_target.save(target_model_name)
+
+    with open("dqn_results.pkl", "wb") as fp:
+        pickle.dump([score_list, max_score_list, running_reward_list, num_episodes_list], fp)
 
 
 t0 = t = time.time()
@@ -107,7 +122,7 @@ while True:
         frame_count += 1
 
         # Use epsilon-greedy for exploration
-        if explore and (frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]):
+        if test_ep_count == 0 and explore and (frame_count < epsilon_random_frames or epsilon > np.random.rand(1)[0]):
             # Take random action
             action = np.random.choice(4)
         else:
@@ -182,6 +197,19 @@ while True:
             # Log details
             template = "running reward: {:.2f} at episode {}, frame count {}, time: {}, epsilon: {}"
             print(template.format(running_reward, episode_count, frame_count, time.time() - t, epsilon))
+
+            # for plotting results
+            running_reward_list.append(running_reward)
+            max_score_list.append(max_score)
+            max_score = 0
+            if done_count != 0:
+                score_list.append((tot_score + snake.get_food_count())/done_count)
+            else:
+                score_list.append(snake.get_food_count())
+            num_episodes_list.append(episode_count - prev_num_ep)
+            prev_num_ep = episode_count
+            test_ep_count = 10
+
             t = time.time()
             save_models()
 
@@ -194,9 +222,16 @@ while True:
             del done_history[:1]
 
         if done:
+            score = snake.get_food_count()
+            tot_score += score
+            if max_score < score:
+                max_score = score
+            done_count += 1
             break
         if not explore:
             snake.render(1 / FPS)
+    if test_ep_count > 0:
+        test_ep_count -= 1
 
     episode_reward_history.append(episode_reward)
     if len(episode_reward_history) > 1000:
