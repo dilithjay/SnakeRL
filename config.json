@@ -1,0 +1,15 @@
+{
+  "gamma": 0.9,
+  "epsilon": 1.0,
+  "epsilon_min": 0.1,
+  "epsilon_max": 1.0,
+  "batch_size": 32,
+  "max_steps_per_episode": 10000,
+  "epsilon_random_frames" : 50000,
+  "epsilon_greedy_frames" : 10000000,
+  "max_memory_length" : 100000,
+  "update_after_actions": 4,
+  "update_target_network": 10000,
+  "width": 10,
+  "height": 10
+}

@@ -1,11 +1,10 @@
-import pickle
-
 from snake import SnakeEnv
 import tensorflow as tf
 import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
 import time
+import pickle
 import json
 
 with open("config.json", 'r') as conf:
@@ -14,6 +13,7 @@ WIDTH, HEIGHT = config['width'], config['height']
 snake = SnakeEnv(width=WIDTH, height=HEIGHT)
 num_steps = 10 ** 6
 FPS = 60
+N = 32
 
 # Configuration parameters for the whole setup
 seed = 42
@@ -52,24 +52,42 @@ def create_q_model():
         layer1a = layers.Conv2D(32, 2, strides=1, padding='same', activation="relu")(layer1)
         layer2 = layers.Flatten()(layer1a)
         layer3 = layers.Dense(128, activation="relu")(layer2)
-        sel_action = layers.Dense(4, activation="linear")(layer3)
     else:
         # Convolutions on the frames on the screen
         layer1 = layers.Conv2D(32, 4, strides=4, activation="relu")(inputs)
-        layer2 = layers.Conv2D(64, 3, strides=2, activation="relu")(layer1)
-        layer4 = layers.Flatten()(layer2)
-        layer5 = layers.Dense(256, activation="relu")(layer4)
-        sel_action = layers.Dense(4, activation="linear")(layer5)
+        layer1a = layers.Conv2D(64, 3, strides=2, activation="relu")(layer1)
+        layer2 = layers.Flatten()(layer1a)
+        layer3 = layers.Dense(256, activation="relu")(layer2)
 
-    return keras.Model(inputs=inputs, outputs=sel_action)
+    layer4 = layers.Dense(N * 4, activation="relu")(layer3)
+    shaped = layers.Reshape((4, N))(layer4)
+    probabilities = layers.Softmax(axis=1)(shaped)
+    return keras.Model(inputs=inputs, outputs=probabilities)
 
 
-prefix = "models/ddqn"
+def quantile_huber_loss(target, pred, actions):
+    tau = np.array((2 * (np.arange(1, N + 1) - 1) + 1) / (2 * N))
+    pred = tf.reduce_sum(pred * tf.expand_dims(actions, -1), axis=1)
+    pred_tile = tf.cast(tf.tile(tf.expand_dims(pred, axis=2), [1, 1, N]), dtype=np.float64)
+    target_tile = tf.cast(tf.tile(tf.expand_dims(target, axis=1), [1, N, 1]), dtype=np.float64)
+    huber_loss = tf.cast(loss_function(target_tile, pred_tile), dtype=np.float64)
+    tau = tf.reshape(tau, [1, N])
+    inv_tau = 1.0 - tau
+    tau = tf.tile(tf.expand_dims(tau, axis=1), [1, N, 1])
+    inv_tau = tf.tile(tf.expand_dims(inv_tau, axis=1), [1, N, 1])
+    error_loss = tf.math.subtract(target_tile, pred_tile)
+    k = tf.less(error_loss, 0.0)
+    loss = tf.where(k, inv_tau * huber_loss, tau * huber_loss)
+    loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(loss, axis=2), axis=1))
+    return loss
+
+
+prefix = "models/distributional_dqn"
 suffix = "1"
 model_name = prefix + '_model_' + suffix
 target_model_name = prefix + "_target_model_" + suffix
 
-result_data_loc = "results/ddqn_results.pickle"
+result_data_loc = "results/distributional_dqn_results.pickle"
 
 new_model = False
 
@@ -96,7 +114,7 @@ max_reward = -1000
 episode_count = 0
 frame_count = 0
 
-explore = True
+explore = False
 test_ep_count = 0
 score_list = []
 max_score_list = []
@@ -114,7 +132,7 @@ def save_models():
     model.save(model_name)
     model_target.save(target_model_name)
 
-    with open("ddqn_results.pkl", "wb") as fp:
+    with open(result_data_loc, "wb") as fp:
         pickle.dump([score_list, max_score_list, running_reward_list, num_episodes_list], fp)
 
 
@@ -137,6 +155,7 @@ while True:
             state_tensor = tf.convert_to_tensor(state)
             state_tensor = tf.expand_dims(state_tensor, 0)
             action_probability = model(state_tensor, training=False)
+            action_probability = tf.reduce_sum(action_probability, axis=2)
             # Take best action
             action = tf.argmax(action_probability[0]).numpy()
 
@@ -170,32 +189,26 @@ while True:
                 [float(done_history[i]) for i in indices]
             )
 
-            # Double DQN
-            future_rewards = model_target.predict(state_next_sample)
-            future_rewards_online = model.predict(state_next_sample)
-            online_action = tf.argmax(future_rewards_online, axis=1)
-            indices = [[i, online_action[i]] for i in range(len(online_action))]
-            expected_q_val = tf.gather_nd(future_rewards, indices)
-            # Q value = reward + discount factor * expected future reward
-            updated_q_values = rewards_sample + gamma * expected_q_val
-
-            # If final frame set the last value to -1
-            updated_q_values = updated_q_values * (1 - done_sample) - done_sample
+            # Build the updated Q-values for the sampled future states
+            # Use the target model for stability
+            mat_1 = model_target.predict(state_next_sample)
+            next_actions = np.argmax(np.mean(mat_1, axis=2), axis=1)
+            theta = []
+            for i in range(batch_size):
+                if done_sample[i]:
+                    theta.append(np.ones(N) * rewards_sample[i])
+                else:
+                    theta.append(rewards_sample[i] + gamma * mat_1[i][next_actions[i]])
 
             # Create a mask so we only calculate loss on the updated Q-values
             masks = tf.one_hot(action_sample, 4)
 
             with tf.GradientTape() as tape:
-                # Train the model on the states and updated Q-values
-                q_values = model(state_sample)
-
-                # Apply the masks to the Q-values to get the Q-value for action taken
-                q_action = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
-                # Calculate loss between new Q-value and old Q-value
-                loss = loss_function(updated_q_values, q_action)
+                mat_2 = model(state_sample)
+                loss_0 = quantile_huber_loss(theta, mat_2, masks)
 
             # Backpropagation
-            grads = tape.gradient(loss, model.trainable_variables)
+            grads = tape.gradient(loss_0, model.trainable_variables)
             optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
         if frame_count % update_target_network == 0:

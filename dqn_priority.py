@@ -5,23 +5,40 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import time
 import pickle
+import json
 
-WIDTH, HEIGHT = 10, 10
+with open("config.json", 'r') as conf:
+    config = json.load(conf)
+WIDTH, HEIGHT = config['width'], config['height']
 snake = SnakeEnv(width=WIDTH, height=HEIGHT)
 num_steps = 10 ** 6
 FPS = 60
 
 # Configuration parameters for the whole setup
 seed = 42
-gamma = 0.99  # Discount factor for past rewards
-epsilon = 1.0  # Epsilon greedy parameter
-epsilon_min = 0.1  # Minimum epsilon greedy parameter
-epsilon_max = 1.0  # Maximum epsilon greedy parameter
+gamma = config['gamma']  # Discount factor for past rewards
+epsilon = config['epsilon']  # Epsilon greedy parameter
+epsilon_min = config['epsilon_min']  # Minimum epsilon greedy parameter
+epsilon_max = config['epsilon_max']  # Maximum epsilon greedy parameter
 epsilon_interval = (
         epsilon_max - epsilon_min
 )  # Rate at which to reduce chance of random action being taken
-batch_size = 32  # Size of batch taken from replay buffer
-max_steps_per_episode = 10000
+batch_size = config['batch_size']  # Size of batch taken from replay buffer
+
+max_steps_per_episode = config['max_steps_per_episode']
+# Number of frames to take random action and observe output
+epsilon_random_frames = config["epsilon_random_frames"]
+# Number of frames for exploration
+epsilon_greedy_frames = config["epsilon_greedy_frames"]
+# Maximum replay length
+# Note: The DeepMind paper suggests 1000000 however this causes memory issues
+max_memory_length = config["max_memory_length"]
+# Train the model after 4 actions
+update_after_actions = config["update_after_actions"]
+# How often to update the target network
+update_target_network = config["update_target_network"]
+# Using huber loss for stability
+loss_function = keras.losses.Huber()
 
 
 def create_q_model():
@@ -77,19 +94,6 @@ running_reward = 0
 max_reward = -1000
 episode_count = 0
 frame_count = 0
-# Number of frames to take random action and observe output
-epsilon_random_frames = 50000
-# Number of frames for exploration
-epsilon_greedy_frames = 10000000
-# Maximum replay length
-# Note: The DeepMind paper suggests 1000000 however this causes memory issues
-max_memory_length = 100000
-# Train the model after 4 actions
-update_after_actions = 4
-# How often to update the target network
-update_target_network = 10000
-# Using huber loss for stability
-loss_function = keras.losses.Huber()
 
 
 def huber_priority_loss_func(values, actions, importance_norm, delta=1.0):
@@ -122,7 +126,7 @@ def save_models():
     model.save(model_name)
     model_target.save(target_model_name)
 
-    with open("dqn_priority_results.pkl", "wb") as fp:
+    with open(result_data_loc, "wb") as fp:
         pickle.dump([score_list, max_score_list, running_reward_list, num_episodes_list], fp)
 
 

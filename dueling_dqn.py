@@ -1,11 +1,10 @@
-import pickle
-
 from snake import SnakeEnv
 import tensorflow as tf
 import numpy as np
 from tensorflow import keras
 from tensorflow.keras import layers
 import time
+import pickle
 import json
 
 with open("config.json", 'r') as conf:
@@ -52,34 +51,39 @@ def create_q_model():
         layer1a = layers.Conv2D(32, 2, strides=1, padding='same', activation="relu")(layer1)
         layer2 = layers.Flatten()(layer1a)
         layer3 = layers.Dense(128, activation="relu")(layer2)
-        sel_action = layers.Dense(4, activation="linear")(layer3)
     else:
         # Convolutions on the frames on the screen
         layer1 = layers.Conv2D(32, 4, strides=4, activation="relu")(inputs)
-        layer2 = layers.Conv2D(64, 3, strides=2, activation="relu")(layer1)
-        layer4 = layers.Flatten()(layer2)
-        layer5 = layers.Dense(256, activation="relu")(layer4)
-        sel_action = layers.Dense(4, activation="linear")(layer5)
+        layer1a = layers.Conv2D(64, 3, strides=2, activation="relu")(layer1)
+        layer2 = layers.Flatten()(layer1a)
+        layer3 = layers.Dense(256, activation="relu")(layer2)
+    v = layers.Dense(1)(layer3)
+    a = layers.Dense(4)(layer3)
+    q = v + (a - tf.reduce_mean(a, axis=1, keepdims=True))
 
-    return keras.Model(inputs=inputs, outputs=sel_action)
+    return keras.Model(inputs=inputs, outputs=q), keras.Model(inputs=inputs, outputs=a)
 
 
-prefix = "models/ddqn"
+prefix = "models/dueling_dqn"
 suffix = "1"
 model_name = prefix + '_model_' + suffix
+model_a_name = model_name + '_a'
 target_model_name = prefix + "_target_model_" + suffix
+target_model_a_name = target_model_name + '_a'
 
-result_data_loc = "results/ddqn_results.pickle"
+result_data_loc = "results/dueling_dqn_results.pickle"
 
 new_model = False
 
 if new_model:
-    model = create_q_model()
-    model_target = create_q_model()
+    model, model_a = create_q_model()
+    model_target, model_target_a = create_q_model()
 else:
     print("Loading models...")
     model = keras.models.load_model(model_name, compile=False)
+    model_a = keras.models.load_model(model_a_name, compile=False)
     model_target = keras.models.load_model(target_model_name, compile=False)
+    model_target_a = keras.models.load_model(target_model_a_name, compile=False)
     print("Loaded.")
 
 optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
@@ -96,7 +100,7 @@ max_reward = -1000
 episode_count = 0
 frame_count = 0
 
-explore = True
+explore = False
 test_ep_count = 0
 score_list = []
 max_score_list = []
@@ -112,9 +116,11 @@ def save_models():
     global max_reward, model, model_target
     max_reward = running_reward
     model.save(model_name)
+    model_a.save(model_a_name)
     model_target.save(target_model_name)
+    model_target_a.save(target_model_a_name)
 
-    with open("ddqn_results.pkl", "wb") as fp:
+    with open(result_data_loc, "wb") as fp:
         pickle.dump([score_list, max_score_list, running_reward_list, num_episodes_list], fp)
 
 
@@ -136,7 +142,7 @@ while True:
             # From environment state
             state_tensor = tf.convert_to_tensor(state)
             state_tensor = tf.expand_dims(state_tensor, 0)
-            action_probability = model(state_tensor, training=False)
+            action_probability = model_a(state_tensor)
             # Take best action
             action = tf.argmax(action_probability[0]).numpy()
 
@@ -170,14 +176,13 @@ while True:
                 [float(done_history[i]) for i in indices]
             )
 
-            # Double DQN
+            # Build the updated Q-values for the sampled future states
+            # Use the target model for stability
             future_rewards = model_target.predict(state_next_sample)
-            future_rewards_online = model.predict(state_next_sample)
-            online_action = tf.argmax(future_rewards_online, axis=1)
-            indices = [[i, online_action[i]] for i in range(len(online_action))]
-            expected_q_val = tf.gather_nd(future_rewards, indices)
             # Q value = reward + discount factor * expected future reward
-            updated_q_values = rewards_sample + gamma * expected_q_val
+            updated_q_values = rewards_sample + gamma * tf.reduce_max(
+                future_rewards, axis=1
+            )
 
             # If final frame set the last value to -1
             updated_q_values = updated_q_values * (1 - done_sample) - done_sample
